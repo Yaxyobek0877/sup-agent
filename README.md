@@ -11,7 +11,7 @@ bajaradi: shell buyruq, fayl olish/berish, o'zini yangilash.
 
 ```
    makbuk ─┐
-   server ─┼──►  MARKAZ (agent.1pro.uz)  ◄── siz: agent hub run / cp / update
+   server ─┼──►  MARKAZ (agi.1pro.uz)  ◄── siz: agent hub run / cp / update
    vps    ─┘
 ```
 
@@ -35,14 +35,21 @@ agent hub key
 
 | kalit | ma'nosi |
 |-------|---------|
-| `hub` | markaz manzili, masalan `https://agent.1pro.uz` yoki `http://192.168.1.10:8765` |
+| `hub` | markaz manzili, masalan `https://agi.1pro.uz` yoki `http://192.168.1.10:8765` |
 | `key` | fleet kaliti (markazdan) |
 | `node_id` | bo'sh qoldiring - o'zi yaratadi va yozib qo'yadi |
 | `name` | qulay nom, masalan `makbuk`, `vps-1` |
 | `shell` | `null` (OS standarti) yoki masalan `/bin/bash` |
 | `projects` | shu qurilmadagi loyihalar `[{ "name": ..., "path": ... }]` |
 
-## Doim ishlab turishi
+## Doim ishlab turishi (autostart)
+
+> To'liq yo'riqnoma — **[docs/O'RNATISH.md](docs/O'RNATISH.md)**. U shu
+> serverdagi AI uchun yozilgan: bosqichma-bosqich o'rnatish va **majburiy
+> tekshiruv** (qayta yuklashdan keyin ham o'zi ulanishini isbotlash). Qurilmani
+> AI sozlayotgan bo'lsa — o'sha faylni to'liq bajarsin va hisobot qaytarsin.
+
+Qisqacha:
 
 ### macOS (launchd)
 

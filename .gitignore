@@ -1,0 +1,13 @@
+# Sir: fleet kaliti va node kimligi shu yerda - hech qachon gitga tushmaydi
+config.json
+.node-id
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db

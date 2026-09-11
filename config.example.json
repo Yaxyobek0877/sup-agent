@@ -1,0 +1,11 @@
+{
+  "hub": "https://agent.1pro.uz",
+  "key": "MARKAZDAN-OLINGAN-FLEET-KALITI",
+  "node_id": "",
+  "name": "makbuk",
+  "shell": null,
+  "projects": [
+    { "name": "sayt", "path": "~/projects/sayt" }
+  ],
+  "labels": { "joy": "uy", "egasi": "yaxyobek" }
+}

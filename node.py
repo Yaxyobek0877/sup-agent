@@ -49,6 +49,7 @@ BACKOFF_MAX = 30
 # chiqqan fleet kaliti buyruq soxtalashtira olmaydi. Bu funksiyalar markazdagi
 # core/signing.py bilan AYNAN bir xil bo'lishi shart (kanonik satr bir xil).
 _SIGVER = "hs1"
+L_INFO, L_WARN, L_ERROR = "info", "warn", "error"
 
 
 def _canon(cmd_id, node_id, kind, payload, issued_at, expires_at, nonce):
@@ -123,6 +124,7 @@ class Node:
         self.projects = _norm_projects(cfg.get("projects"))
         self.sign_key = cfg.get("sign_key") or ""   # buyruq imzosi kaliti
         self.seen = set()                            # bajarilgan buyruq id lari (takrorga qarshi)
+        self.logbuf = []                             # markazga yuboriladigan jurnal
         parsed = urllib.parse.urlparse(self.hub)
         self._https = parsed.scheme == "https"
         self._host = parsed.hostname
@@ -138,6 +140,29 @@ class Node:
                      "X-Fleet-Key": self.key, "X-Node-Id": self.node_id})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
+
+    # ---- markaziy jurnal: node nima qilyapti / qanday xatoga uchradi ----
+
+    def _log(self, level: str, detail: str) -> None:
+        """Bir qatorni ekranga chiqaradi va markazga yuborish uchun buferga
+        qo'yadi. Node noto'g'ri ishlasa ham, sabab markazda ko'rinsin."""
+        line = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "level": level, "detail": str(detail)[:1000]}
+        self.logbuf.append(line)
+        if len(self.logbuf) > 200:       # ulanmagan bo'lsa cheksiz o'smasin
+            self.logbuf = self.logbuf[-200:]
+        print(f"[sup-agent] {level}: {detail}")
+
+    def _flush_logs(self) -> None:
+        """Buferdagi jurnalni markazga yuboradi. Yuborilmasa - keyingi safar."""
+        if not self.logbuf:
+            return
+        batch, self.logbuf = self.logbuf[:100], self.logbuf[100:]
+        try:
+            self._post("/api/hub/log",
+                       {"node_id": self.node_id, "logs": batch}, 30)
+        except (urllib.error.URLError, OSError):
+            self.logbuf = batch + self.logbuf     # qaytarib qo'yamiz
 
     def _conn(self):
         if self._https:
@@ -192,7 +217,7 @@ class Node:
         return True, "ok"
 
     def run_forever(self, once: bool = False) -> None:
-        print(f"[sup-agent] {self.name} ({self.node_id}) -> {self.hub}")
+        self._log(L_INFO, f"ishga tushdi {self.name} -> {self.hub}")
         backoff = 1
         while True:
             try:
@@ -202,17 +227,20 @@ class Node:
                 cmd = resp.get("command")
                 if cmd:
                     self.handle(cmd)
+                self._flush_logs()
                 if once:
                     return
             except urllib.error.HTTPError as exc:
                 if exc.code == 403:
                     print("[sup-agent] bu qurilma bloklangan. To'xtatilyapti.")
                     return
-                print(f"[sup-agent] markaz xatosi {exc.code}, {backoff}s kutish")
+                # Markazga yetdik, lekin xato qaytdi - buni ham yozib qo'yamiz
+                self._log(L_WARN, f"markaz xatosi {exc.code}")
                 time.sleep(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX)
             except (urllib.error.URLError, OSError, ConnectionError) as exc:
-                print(f"[sup-agent] ulanmadi ({exc}); {backoff}s kutish")
+                # Ulanmadi - jurnal buferda qoladi, ulangach yuboriladi
+                self._log(L_WARN, f"ulanmadi: {exc}")
                 time.sleep(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX)
                 if once:
@@ -227,10 +255,10 @@ class Node:
         # Imzo tekshiruvi - imzosiz/soxta buyruq BAJARILMAYDI.
         ok, why = self._authorize(cmd)
         if not ok:
-            print(f"[sup-agent] buyruq #{cid} RAD ETILDI: {why}")
+            self._log(L_ERROR, f"buyruq #{cid} rad etildi: {why}")
             self._report(cid, "error", {"error": f"imzo rad etdi: {why}"}, None)
             return
-        print(f"[sup-agent] buyruq #{cid}: {kind}")
+        self._log(L_INFO, f"buyruq #{cid}: {kind}")
         try:
             if kind == "run":
                 status, result, code = self._do_run(payload)
@@ -240,12 +268,22 @@ class Node:
                 status, result, code = self._do_get(payload)
             elif kind == "update":
                 self._report(cid, "done", {"note": "yangilanyapti"}, 0)
+                self._log(L_INFO, "yangilanish boshlandi")
+                self._flush_logs()
                 self._do_update()
                 return
             else:
                 status, result, code = "error", {"error": f"noma'lum: {kind}"}, None
         except Exception as exc:  # noqa: BLE001 - har qanday xato natija bo'lib qaytadi
             status, result, code = "error", {"error": str(exc)}, None
+        # Natija - ayniqsa xato - markaziy jurnalga tushsin
+        extra = ""
+        if status == "error":
+            r = result or {}
+            extra = ": " + str(r.get("error") or r.get("stderr")
+                               or f"kod {code}")[:200]
+        self._log(L_ERROR if status == "error" else L_INFO,
+                  f"#{cid} {kind} -> {status}{extra}")
         self._report(cid, status, result, code)
 
     def _do_run(self, p: dict):

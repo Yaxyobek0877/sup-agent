@@ -39,8 +39,9 @@ CONFIG = HERE / "config.json"
 VERSION = (HERE / "VERSION").read_text().strip() if (HERE / "VERSION").exists() \
     else "1.0.0"
 
-# Long-poll markazda 25s ushlanadi - biz undan uzunroq kutamiz
-POLL_TIMEOUT = 40
+# Long-poll markazda ~45s ushlanadi - biz undan UZUNROQ kutishimiz shart,
+# aks holda javob kelishidan oldin uzilib, buyruq yo'qolishi mumkin.
+POLL_TIMEOUT = 60
 BACKOFF_MAX = 30
 
 # --- buyruq imzosi ---------------------------------------------------------

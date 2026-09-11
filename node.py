@@ -18,6 +18,7 @@ Ishga tushirish:
     python node.py                 # config.json shu yerda bo'lishi kerak
     python node.py --once          # bir marta so'rab, chiqib ketadi (sinov)
 """
+import hmac
 import http.client
 import json
 import os
@@ -41,6 +42,42 @@ VERSION = (HERE / "VERSION").read_text().strip() if (HERE / "VERSION").exists() 
 # Long-poll markazda 25s ushlanadi - biz undan uzunroq kutamiz
 POLL_TIMEOUT = 40
 BACKOFF_MAX = 30
+
+# --- buyruq imzosi ---------------------------------------------------------
+# Node faqat IMZOLANGAN buyruqni bajaradi. Imzo kaliti (HMAC) markaz va shu
+# node da bo'ladi - vositachi Worker da hech qachon. Ya'ni Worker yoki sizib
+# chiqqan fleet kaliti buyruq soxtalashtira olmaydi. Bu funksiyalar markazdagi
+# core/signing.py bilan AYNAN bir xil bo'lishi shart (kanonik satr bir xil).
+_SIGVER = "hs1"
+
+
+def _canon(cmd_id, node_id, kind, payload, issued_at, expires_at, nonce):
+    body = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False)
+    return "\n".join([_SIGVER, str(cmd_id), str(node_id), str(kind), body,
+                      str(issued_at), str(expires_at), str(nonce)]).encode("utf-8")
+
+
+def _verify(key_hex, cmd, node_id, now):
+    """(ok, sabab). Imzo, muddat tekshiriladi; takror (nonce/id) chaqiruvchida."""
+    if not key_hex:
+        return False, "imzo kaliti yo'q"
+    try:
+        exp = int(cmd.get("expires_at"))
+    except (TypeError, ValueError):
+        return False, "muddat yaroqsiz"
+    if now > exp:
+        return False, "muddat o'tgan"
+    if str(cmd.get("node_id")) != str(node_id):
+        return False, "boshqa qurilmaga"
+    want = hmac.new(
+        bytes.fromhex(key_hex),
+        _canon(cmd.get("id"), node_id, cmd.get("kind"), cmd.get("payload"),
+               cmd.get("issued_at"), exp, cmd.get("nonce")),
+        "sha256").hexdigest()
+    if not hmac.compare_digest(want, str(cmd.get("sig") or "")):
+        return False, "imzo mos kelmadi"
+    return True, "ok"
 
 
 def load_config() -> dict:
@@ -84,6 +121,8 @@ class Node:
         self.name = cfg.get("name") or self.node_id
         self.shell = cfg.get("shell")  # None = OS standarti
         self.projects = _norm_projects(cfg.get("projects"))
+        self.sign_key = cfg.get("sign_key") or ""   # buyruq imzosi kaliti
+        self.seen = set()                            # bajarilgan buyruq id lari (takrorga qarshi)
         parsed = urllib.parse.urlparse(self.hub)
         self._https = parsed.scheme == "https"
         self._host = parsed.hostname
@@ -119,7 +158,38 @@ class Node:
             "version": VERSION,
             "projects": self.projects,
             "labels": self.cfg.get("labels") or {},
+            "keyed": bool(self.sign_key),
         }
+
+    def _provision(self, prov) -> None:
+        """Markaz birinchi ulanishda imzo kalitini yuboradi - saqlab qo'yamiz."""
+        if not prov:
+            return
+        key = prov.get("sign_key")
+        if key and not self.sign_key:
+            self.sign_key = key
+            try:
+                cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
+                cfg["sign_key"] = key
+                CONFIG.write_text(
+                    json.dumps(cfg, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
+                print("[sup-agent] imzo kaliti o'rnatildi")
+            except OSError as exc:
+                print(f"[sup-agent] kalitni saqlab bo'lmadi: {exc}")
+
+    def _authorize(self, cmd) -> tuple:
+        """Buyruq imzosi va takror tekshiruvi. Faqat o'tgan buyruq bajariladi."""
+        ok, why = _verify(self.sign_key, cmd, self.node_id, int(time.time()))
+        if not ok:
+            return False, why
+        cid = cmd.get("id")
+        if cid in self.seen:
+            return False, "takror"
+        self.seen.add(cid)
+        if len(self.seen) > 5000:
+            self.seen = set(sorted(self.seen)[-2000:])
+        return True, "ok"
 
     def run_forever(self, once: bool = False) -> None:
         print(f"[sup-agent] {self.name} ({self.node_id}) -> {self.hub}")
@@ -128,6 +198,7 @@ class Node:
             try:
                 resp = self._post("/api/hub/poll", self.hello(), POLL_TIMEOUT)
                 backoff = 1
+                self._provision(resp.get("provision"))
                 cmd = resp.get("command")
                 if cmd:
                     self.handle(cmd)
@@ -153,6 +224,12 @@ class Node:
         kind = cmd.get("kind")
         cid = cmd.get("id")
         payload = cmd.get("payload") or {}
+        # Imzo tekshiruvi - imzosiz/soxta buyruq BAJARILMAYDI.
+        ok, why = self._authorize(cmd)
+        if not ok:
+            print(f"[sup-agent] buyruq #{cid} RAD ETILDI: {why}")
+            self._report(cid, "error", {"error": f"imzo rad etdi: {why}"}, None)
+            return
         print(f"[sup-agent] buyruq #{cid}: {kind}")
         try:
             if kind == "run":

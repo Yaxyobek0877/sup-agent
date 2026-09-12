@@ -38,6 +38,9 @@ HERE = Path(__file__).resolve().parent
 CONFIG = HERE / "config.json"
 VERSION = (HERE / "VERSION").read_text().strip() if (HERE / "VERSION").exists() \
     else "1.0.0"
+# Cloudflare standart "Python-urllib" User-Agent ni bloklaydi (Bot Fight Mode),
+# shuning uchun o'zimizniki qo'yamiz - aks holda edge orqali 403 keladi.
+UA = "sup-agent/" + VERSION
 
 # Long-poll markazda ~45s ushlanadi - biz undan UZUNROQ kutishimiz shart,
 # aks holda javob kelishidan oldin uzilib, buyruq yo'qolishi mumkin.
@@ -137,7 +140,7 @@ class Node:
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             f"{self.hub}{path}", data=data, method="POST",
-            headers={"Content-Type": "application/json",
+            headers={"Content-Type": "application/json", "User-Agent": UA,
                      "X-Fleet-Key": self.key, "X-Node-Id": self.node_id})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -220,10 +223,12 @@ class Node:
     def run_forever(self, once: bool = False) -> None:
         self._log(L_INFO, f"ishga tushdi {self.name} -> {self.hub}")
         backoff = 1
+        blocks = 0
         while True:
             try:
                 resp = self._post("/api/hub/poll", self.hello(), POLL_TIMEOUT)
                 backoff = 1
+                blocks = 0
                 self._provision(resp.get("provision"))
                 cmd = resp.get("command")
                 if cmd:
@@ -233,10 +238,15 @@ class Node:
                     return
             except urllib.error.HTTPError as exc:
                 if exc.code == 403:
-                    print("[sup-agent] bu qurilma bloklangan. To'xtatilyapti.")
-                    return
-                # Markazga yetdik, lekin xato qaytdi - buni ham yozib qo'yamiz
-                self._log(L_WARN, f"markaz xatosi {exc.code}")
+                    # 403 haqiqiy blok bo'lishi mumkin, lekin o'tkinchi (proksi/
+                    # WAF) ham. Bittasidan to'xtamaymiz - ketma-ket 5 tadan keyin.
+                    blocks += 1
+                    if blocks >= 5:
+                        self._log(L_WARN, "qurilma bloklangan (403), to'xtatildi")
+                        return
+                    self._log(L_WARN, f"403 (urinish {blocks}/5)")
+                else:
+                    self._log(L_WARN, f"markaz xatosi {exc.code}")
                 time.sleep(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX)
             except (urllib.error.URLError, OSError, ConnectionError) as exc:
@@ -331,6 +341,7 @@ class Node:
         conn = self._conn()
         q = urllib.parse.urlencode({"name": name})
         conn.putrequest("POST", f"/api/hub/blob?{q}")
+        conn.putheader("User-Agent", UA)
         conn.putheader("X-Fleet-Key", self.key)
         conn.putheader("X-Node-Id", self.node_id)
         conn.putheader("Content-Type", "application/octet-stream")
@@ -353,7 +364,8 @@ class Node:
     def _download(self, blob_id: str, dest: str) -> int:
         req = urllib.request.Request(
             f"{self.hub}/api/hub/blob/{blob_id}",
-            headers={"X-Fleet-Key": self.key, "X-Node-Id": self.node_id})
+            headers={"User-Agent": UA, "X-Fleet-Key": self.key,
+                     "X-Node-Id": self.node_id})
         size = 0
         with urllib.request.urlopen(req, timeout=1800) as resp, \
                 open(dest, "wb") as fh:

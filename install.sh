@@ -17,10 +17,24 @@ cd "$HERE"
 log() { printf '\n[install] %s\n' "$*"; }
 die() { printf '\n[install] XATO: %s\n' "$*" >&2; exit 1; }
 
-# 0) Kalit muhitda bo'lishi shart (chatga yozilmaydi)
-[ -n "${SUP_FLEET_KEY:-}" ] || die "SUP_FLEET_KEY muhitda yo'q.
-  Markazda:  agent hub key
-  So'ng:     export SUP_FLEET_KEY='...'   (kalitni chatga yozmang)"
+# 0) Fleet kaliti: MUHITDAN yoki KALIT FAYLIDAN (~/.sup_key yoki ./.sup_key).
+#    Fayl — markazdan `scp .fleet-key user@host:~/.sup_key` bilan tashilgan sir.
+#    Shunday qilingani uchun agentning "yangi shell" muhiti muhim emas: skript
+#    kalitni fayldan o'qiydi va config yozilgach faylni O'CHIRADI.
+KEYFILE=""
+if [ -z "${SUP_FLEET_KEY:-}" ]; then
+  for f in "$HOME/.sup_key" "$HERE/.sup_key"; do
+    if [ -f "$f" ]; then
+      SUP_FLEET_KEY="$(tr -d '\r\n' < "$f")"
+      export SUP_FLEET_KEY
+      KEYFILE="$f"
+      break
+    fi
+  done
+fi
+[ -n "${SUP_FLEET_KEY:-}" ] || die "fleet kaliti yo'q (muhitda ham, ~/.sup_key da ham).
+  Markazdan:  scp .fleet-key <user>@<host>:~/.sup_key
+  yoki:       export SUP_FLEET_KEY='...'   (kalitni chatga yozmang)"
 
 # 1) Talablar
 command -v python3 >/dev/null || die "python3 yo'q (apt install -y python3)"
@@ -32,9 +46,13 @@ NODE_USER="${SUDO_USER:-$(id -un)}"     # servis shu foydalanuvchi ostida ishlay
 OS="$(uname -s)"
 
 # 2) config.json (kalit muhitdan; qiymati hech qayerda ko'rsatilmaydi)
+#    Nom berilmasa - hostname (masalan "face").
+export SUP_NODE_NAME="${SUP_NODE_NAME:-$(hostname -s 2>/dev/null || hostname)}"
 [ -f config.json ] || cp config.example.json config.json
 "$PY" setup_config.py || die "config yozilmadi"
 chmod 600 config.json
+# Kalit endi config.json da (600) — vaqtincha kalit faylini o'chiramiz.
+if [ -n "$KEYFILE" ]; then rm -f "$KEYFILE" && log "kalit fayli o'chirildi: $KEYFILE"; fi
 
 # 3) Ulanish sinovi
 log "ulanish sinovi: node.py --once"

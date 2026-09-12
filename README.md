@@ -21,7 +21,10 @@ bajaradi: shell buyruq, fayl olish/berish, o'zini yangilash.
 git clone https://github.com/Yaxyobek0877/sup-agent.git
 cd sup-agent
 cp config.example.json config.json
-# config.json ni tahrirlang: markaz manzili va fleet kaliti
+# Kalitni muhit orqali bering (chatga/faylga matn qilib yozmang):
+export SUP_FLEET_KEY='<markazda: agent hub key>'
+export SUP_NODE_NAME='makbuk'
+python3 setup_config.py       # config.json ni to'ldiradi, chmod 600 qiladi
 python3 node.py
 ```
 
@@ -30,6 +33,12 @@ Fleet kalitini markazda oling:
 ```bash
 agent hub key
 ```
+
+> **Qurilmani AI sozlasa (30+ server uchun)** — o'rnatishni har serverdagi
+> Claude Code ga topshiring: **[docs/OPERATOR-PROMPT.md](docs/OPERATOR-PROMPT.md)**.
+> Repoda `.claude/settings.json` (o'rnatish so'rovsiz, xavfli buyruq bloklangan)
+> va `CLAUDE.md` (buzilmas qoidalar) borligi uchun bu **bypass rejimida ham
+> xavfsiz**.
 
 `config.json`:
 
@@ -122,11 +131,23 @@ agent hub block makbuk                 # qurilmani vaqtincha to'xtatish
 - Markaz qurilmaga **shell buyruq yuboradi va u bajariladi** - bu ataylab
   shunday (fleet boshqaruvi, Ansible kabi). Faqat fleet kalitini biladigan
   markaz buyura oladi.
+- **Buyruq imzosi (HMAC):** node faqat markaz imzolagan buyruqni bajaradi.
+  Imzo kaliti (`sign_key`) markaz va node da bo'ladi, vositachi Worker da
+  **hech qachon** — shuning uchun sizib chiqqan fleet kaliti yoki buzilgan
+  edge buyruq soxtalashtira olmaydi. Imzosiz/muddati o'tgan/takror buyruq rad
+  etiladi.
+- **Sir himoyasi:** `config.json` (fleet + imzo kaliti) `.gitignore` da va
+  ruxsati `600` bo'lishi kerak. `python3 setup_config.py` kalitni muhitdan
+  oladi — qiymati chatga/faylga matn qilib yozilmaydi.
 - Kalit tarqalsa: markazda yangisini yarating (`.fleet-key` faylini o'chirib
   serverni qayta ishga tushiring) va har qurilma `config.json` ini yangilang.
 - Bitta qurilmani kalitni almashtirmasdan to'xtatish: `agent hub block <nom>`.
 - `hub` manzilini `https://` qiling (domen orqali) - yo'lda buyruq va fayllar
   shifrlanadi. Ochiq tarmoqda `http://` ishlatmang.
+- **AI o'rnatsa:** repoda `CLAUDE.md` (buzilmas qoidalar — sirni oshkor
+  qilmaslik, reboot/firewall/boshqa xizmatga tegmaslik) va `.claude/settings.json`
+  (o'rnatish so'rovsiz, halokatli buyruqlar `deny`) bor. Shuning uchun avtomatik
+  (bypass) o'rnatishda ham xavfsizlik qoidalari buzilmaydi.
 
 ## O'zini yangilash
 

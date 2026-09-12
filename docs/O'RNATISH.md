@@ -25,6 +25,20 @@ Ishni tugatdim deyishdan oldin **hammasi** bajarilgan bo'lishi shart:
 Tekshiruvni "ehtimol ishlaydi" deb o'tkazib yuborma. Har bir tekshiruv
 buyrug'ini **haqiqatan ishga tushir** va chiqishini ko'r.
 
+> 🚫 **Buzilmas qoidalar** ([CLAUDE.md](../CLAUDE.md) da to'liq): sirni
+> (`config.json`) oshkor qilma; faqat sup-agent ishini qil, boshqa xizmatga
+> tegma; **reboot/shutdown qilma**; firewall/xavfsizlik sozlamalariga tegma;
+> tizim yo'llarida `rm -rf`, `mkfs`, `dd` ishlatma. Bularni **avtomatik
+> (bypass) rejimida ham** buzma.
+
+### Avtomatik (bypass) rejimi
+
+Ega seni ruxsat so'ramaydigan rejimda ishga tushirishi mumkin. Bu holatda ham
+ikki himoya ishlaydi: `.claude/settings.json` — o'rnatish buyruqlari so'rovsiz
+o'tadi, halokatli buyruqlar (`deny`) **bloklangan**; va shu qoidalar. Tez
+ishla, ammo yuqoridagi qizil chiziqlarni kesma. Batafsil operator ko'rsatmasi:
+[OPERATOR-PROMPT.md](OPERATOR-PROMPT.md).
+
 ---
 
 ## 1. Talablar
@@ -46,27 +60,34 @@ sudo git clone https://github.com/Yaxyobek0877/sup-agent.git /opt/sup-agent
 cd /opt/sup-agent
 ```
 
-## 3. config.json ni yozish
+## 3. config.json ni yozish (kalit muhit orqali — sir tushmasin)
+
+`config.json` da **fleet kaliti** bo'ladi — bu sir. Uni matn sifatida bu
+yerga yozib, chatga/jurnalga/commitga tushirmaslik uchun kalitni **muhit
+o'zgaruvchisidan** olamiz. Ega (seni ishga tushirgan odam) uni oldindan
+export qilib qo'ygan bo'lishi kerak:
+
+```bash
+export SUP_FLEET_KEY='<markazda: agent hub key>'   # ega beradi
+export SUP_NODE_NAME='vps-frankfurt'               # takrorlanmas nom
+```
+
+Keyin config ni yordamchi skript to'ldiradi (kalit qiymatini ko'rsatmaydi,
+faylni `chmod 600` qiladi):
 
 ```bash
 cp config.example.json config.json
+python3 setup_config.py
 ```
 
-`config.json` ni tahrirla:
+Kutilgan chiqish: `config.json to'ldirildi: hub=https://agi.1pro.uz name=… (kalit yashirin, ruxsat 600)`.
 
-```json
-{
-  "hub": "https://agi.1pro.uz",
-  "key": "<MARKAZDAN OLINGAN FLEET KALITI>",
-  "node_id": "",
-  "name": "<shu qurilmaga qulay nom, masalan vps-frankfurt>",
-  "projects": []
-}
-```
-
-- `key` ni egadan so'ra yoki markazda `agent hub key` chiqaradi.
-- `node_id` ni bo'sh qoldir — birinchi ishga tushganda o'zi yaratadi.
-- `name` — takrorlanmas, aniq nom qo'y.
+- `SUP_FLEET_KEY` bo'sh bo'lsa skript to'xtaydi — egadan kalitni so'ra
+  (`agent hub key`), **lekin kalit qiymatini chatga yozma**.
+- `node_id` o'z-o'zidan yaratiladi (bo'sh qoldiriladi).
+- **Kalitni hech qachon** `cat config.json`, `echo`, commit yoki skrinshot
+  bilan oshkor qilma. `config.json` allaqachon `.gitignore` da — `git add -f`
+  bilan ham majburlama.
 
 ## 4. Birinchi ulanishni sinash
 
@@ -216,6 +237,18 @@ git -C /opt/sup-agent remote -v       # origin -> .../sup-agent.git
 git -C /opt/sup-agent status -sb      # ## main...origin/main, toza
 ```
 
+### 6.6 Sir himoyasi (config.json git ga tushmagan, ruxsati tor)
+
+```bash
+# Linux/macOS: faqat ega o'qiy oladimi (-rw------- yoki 600)
+ls -l config.json                     # -> -rw------- ... config.json
+git -C . check-ignore config.json     # -> config.json (e'tiborsiz qoldirilgan)
+git -C . status --porcelain config.json   # -> BO'SH (kuzatuvda emas)
+```
+
+`config.json` ruxsati 600 emas yoki git holatida ko'rinsa — darhol tuzat
+(`chmod 600 config.json`), commitga qo'shma.
+
 ---
 
 ## 7. Hisobot (ishni tugatganda)
@@ -224,7 +257,8 @@ Egaga shu qatorni qaytar:
 
 ```
 node: <nom> (<id>) · <OS> · autostart: <systemd|launchd|task> ·
-tekshiruv: yoqilgan=ha, o'zini-ko'tardi=ha, markazda-onlayn=ha
+tekshiruv: yoqilgan=ha, o'zini-ko'tardi=ha, markazda-onlayn=ha,
+sir-himoya=ha (config.json 600, git da yo'q)
 ```
 
 Biror band "yo'q" bo'lsa — sabab bilan yoz va tuzat. Autostart yoki reboot

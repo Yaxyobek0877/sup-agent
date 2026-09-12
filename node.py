@@ -278,10 +278,7 @@ class Node:
             elif kind == "get":
                 status, result, code = self._do_get(payload)
             elif kind == "update":
-                self._report(cid, "done", {"note": "yangilanyapti"}, 0)
-                self._log(L_INFO, "yangilanish boshlandi")
-                self._flush_logs()
-                self._do_update()
+                self._do_update(cid)
                 return
             else:
                 status, result, code = "error", {"error": f"noma'lum: {kind}"}, None
@@ -386,17 +383,83 @@ class Node:
 
     # ---- o'zini yangilash ----
 
-    def _do_update(self) -> None:
-        print("[sup-agent] git pull ...")
+    def _git(self, *args, timeout=120):
+        """git buyrug'ini repo papkasida ishga tushiradi (natijani qaytaradi)."""
+        return subprocess.run(["git", "-C", str(HERE), *args],
+                              capture_output=True, text=True, timeout=timeout)
+
+    def _head(self) -> str:
         try:
-            out = subprocess.run(
-                ["git", "-C", str(HERE), "pull", "--ff-only"],
-                capture_output=True, text=True, timeout=120)
-            print(out.stdout.strip() or out.stderr.strip())
-        except Exception as exc:  # noqa: BLE001
-            print(f"[sup-agent] yangilash xatosi: {exc}")
+            return self._git("rev-parse", "HEAD", timeout=30).stdout.strip()
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _do_update(self, cid) -> None:
+        """GitHubdan yangilaydi va HAQIQIY natijani markazga qaytaradi.
+
+        Muhim: avval `git pull` qilamiz, keyin natijaga qarab xabar beramiz.
+        Ilgari "done" pull'dan OLDIN yuborilardi - pull yiqilsa ham markaz
+        "yangilandi" deb bilardi. Endi:
+          * pull yiqilsa  -> `error` (sabab bilan), qayta ishga tushmaymiz;
+          * o'zgarish yo'q -> `done` ("allaqachon eng yangi"), restart yo'q;
+          * yangilandi     -> `done` (yangi commit/versiya), so'ng qayta ishga.
+        `os.execv` dan keyin xabar berib bo'lmaydi, shuning uchun muvaffaqiyat
+        xabari restartdan bir lahza oldin yuboriladi.
+        """
+        before = self._head()
+        self._log(L_INFO, "yangilanish: git pull --ff-only")
+        try:
+            out = self._git("pull", "--ff-only", timeout=120)
+        except Exception as exc:  # noqa: BLE001 - git yo'q, timeout va h.k.
+            self._log(L_ERROR, f"yangilanish: git ishlamadi: {exc}")
+            self._report(cid, "error", {"error": f"git pull ishga tushmadi: {exc}"},
+                         None)
+            self._flush_logs()
             return
-        print("[sup-agent] qayta ishga tushirilyapti ...")
+        if out.returncode != 0:
+            why = (out.stderr or out.stdout or "").strip()[:400]
+            self._log(L_ERROR, f"yangilanish rad etildi: {why}")
+            self._report(cid, "error",
+                         {"error": f"git pull rad etdi: {why}"}, out.returncode)
+            self._flush_logs()
+            return
+
+        after = self._head()
+        ver = (HERE / "VERSION").read_text().strip() \
+            if (HERE / "VERSION").exists() else VERSION
+        if after and after == before:
+            self._log(L_INFO, "allaqachon eng yangi - qayta ishga tushmaydi")
+            self._report(cid, "done",
+                         {"note": "allaqachon eng yangi", "version": ver,
+                          "commit": after[:7]}, 0)
+            self._flush_logs()
+            return
+
+        # Yangi kod BUTUNligini restartdan oldin tekshiramiz: buzuq commit
+        # (sintaksis xatosi) crash-loop qilmasin. Sinsa - oldingi commitga
+        # qaytamiz va eski (hozir xotiradagi) kodda ishlab qolaveramiz.
+        chk = subprocess.run(
+            [sys.executable, "-m", "py_compile", str(HERE / "node.py")],
+            capture_output=True, text=True)
+        if chk.returncode != 0:
+            why = (chk.stderr or "sintaksis xatosi").strip()[:400]
+            try:
+                self._git("reset", "--hard", before or "HEAD@{1}", timeout=60)
+            except Exception as exc:  # noqa: BLE001
+                why += f" | rollback xatosi: {exc}"
+            self._log(L_ERROR, f"yangi kod buzuq, orqaga qaytdim: {why}")
+            self._report(cid, "error",
+                         {"error": f"yangi kod buzuq (rollback qilindi): {why}"},
+                         None)
+            self._flush_logs()
+            return
+
+        # Muvaffaqiyat: restartdan OLDIN aniq xabar (keyin imkoni yo'q).
+        self._log(L_INFO, f"yangilandi -> {ver} ({after[:7]}); qayta ishga tushyapti")
+        self._report(cid, "done",
+                     {"note": (out.stdout or "").strip()[:400] or "yangilandi",
+                      "version": ver, "commit": after[:7]}, 0)
+        self._flush_logs()
         os.execv(sys.executable,
                  [sys.executable, str(HERE / "node.py"), *sys.argv[1:]])
 

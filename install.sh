@@ -7,8 +7,13 @@
 #   bash install.sh
 #
 # Hammasini o'zi qiladi: config (kalit MUHITDAN, chmod 600), ulanish sinovi,
-# autostart (Restart=always + boot), majburiy kill-sinovi (REBOOT EMAS),
-# sir-himoya tekshiruvi va hisobot. Idempotent: qayta ishga tushirsa xavfsiz.
+# autostart, majburiy kill-sinovi (REBOOT EMAS), sir-himoya tekshiruvi, hisobot.
+# Idempotent: qayta ishga tushirsa xavfsiz.
+#
+# Autostart rejimi AVTOMATIK tanlanadi:
+#   * root yoki PAROLSIZ sudo bor  -> tizim systemd (Restart=always)
+#   * aks holda (sudo parol so'raydi/yo'q) -> ROOT'SIZ: cron + supervizor
+#     (sup-run.sh). Sudo/parol umuman kerak emas, node foydalanuvchi ostida.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +50,18 @@ SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
 NODE_USER="${SUDO_USER:-$(id -un)}"     # servis shu foydalanuvchi ostida ishlaydi
 OS="$(uname -s)"
 
+# Rejim: root yoki PAROLSIZ sudo bo'lsa - tizim systemd (mustahkam). Aks holda
+# (sudo parol so'raydi/yo'q) - ROOT'SIZ rejim: cron + supervizor, sudo umuman
+# kerak emas. Shunday qilib parolsiz ham, interaktivsiz ham o'rnatiladi.
+CAN_SYS=0
+if [ "$OS" = "Linux" ]; then
+  if [ "$(id -u)" -eq 0 ]; then
+    CAN_SYS=1
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    CAN_SYS=1
+  fi
+fi
+
 # 2) config.json (kalit muhitdan; qiymati hech qayerda ko'rsatilmaydi)
 #    Nom berilmasa - hostname (masalan "face").
 export SUP_NODE_NAME="${SUP_NODE_NAME:-$(hostname -s 2>/dev/null || hostname)}"
@@ -59,7 +76,7 @@ log "ulanish sinovi: node.py --once"
 "$PY" node.py --once || die "markazga ulanmadi - kalit yoki tarmoqni tekshiring"
 
 # 4) Autostart
-if [ "$OS" = "Linux" ]; then
+if [ "$OS" = "Linux" ] && [ "$CAN_SYS" = "1" ]; then
   command -v systemctl >/dev/null || die "systemd yo'q - docs/O'RNATISH.md §5 qo'lda"
   UNIT=/etc/systemd/system/sup-agent.service
   log "systemd birligi: $UNIT (User=$NODE_USER)"
@@ -83,6 +100,19 @@ EOF
   $SUDO systemctl daemon-reload
   $SUDO systemctl enable --now sup-agent
   AUTOSTART="systemd"
+elif [ "$OS" = "Linux" ]; then
+  # ROOT'SIZ rejim (sudo yo'q yoki parol so'raydi): cron + supervizor.
+  # Sudo/parol UMUMAN kerak emas. Node `face` foydalanuvchisi ostida ishlaydi.
+  command -v crontab >/dev/null || die "cron yo'q - root'siz autostart imkonsiz"
+  command -v flock >/dev/null || die "flock yo'q (util-linux) - kerak"
+  chmod +x sup-run.sh 2>/dev/null || true
+  log "root'siz autostart: cron (@reboot + har daqiqa) + supervizor - sudo yo'q"
+  RUN="cd $HERE && ./sup-run.sh"
+  ( crontab -l 2>/dev/null | grep -vF "$HERE/sup-run.sh" | grep -vF "$RUN"; \
+    printf '@reboot %s\n* * * * * %s\n' "$RUN" "$RUN" ) | crontab -
+  nohup bash -c "$RUN" >/dev/null 2>&1 &    # keyingi daqiqani kutmay darhol
+  sleep 5
+  AUTOSTART="cron"
 elif [ "$OS" = "Darwin" ]; then
   PLIST="$HOME/Library/LaunchAgents/uz.1pro.supagent.plist"
   mkdir -p "$HOME/Library/LaunchAgents"
@@ -111,7 +141,7 @@ fi
 
 # 5) MAJBURIY TEKSHIRUV — yoqilgan + o'zini-ko'tarish (REBOOT EMAS)
 log "tekshiruv: yoqilganmi va o'ldirilsa o'zi ko'tariladimi"
-if [ "$OS" = "Linux" ]; then
+if [ "$AUTOSTART" = "systemd" ]; then
   systemctl is-enabled sup-agent | grep -q enabled || die "is-enabled != enabled"
   systemctl is-active  sup-agent | grep -q active  || die "is-active != active"
   OLDPID="$($SUDO systemctl show -p MainPID --value sup-agent)"
@@ -120,6 +150,14 @@ if [ "$OS" = "Linux" ]; then
   systemctl is-active sup-agent | grep -q active || die "o'ldirilgach ko'tarilmadi"
   NEWPID="$($SUDO systemctl show -p MainPID --value sup-agent)"
   log "o'zini-ko'tardi (PID $OLDPID -> $NEWPID)"
+elif [ "$AUTOSTART" = "cron" ]; then
+  crontab -l 2>/dev/null | grep -qF "sup-run.sh" || die "cron yozilmadi"
+  pgrep -f "node.py" >/dev/null || die "node ishga tushmadi"
+  log "node ishlayapti; o'ldirib, supervizor ~5-10s da ko'taradimi"
+  pkill -f "node.py" 2>/dev/null || true
+  sleep 12
+  pgrep -f "node.py" >/dev/null || die "o'ldirilgach supervizor ko'tarmadi"
+  log "o'zini-ko'tardi (supervizor)"
 else
   launchctl list | grep -q uz.1pro.supagent || die "launchd ro'yxatda yo'q"
   PID="$(launchctl list | awk '/uz.1pro.supagent/{print $1}')"

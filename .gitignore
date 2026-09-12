@@ -8,6 +8,11 @@ config.json
 # shaxsiy override commit bo'lmaydi
 .claude/settings.local.json
 
+# Runtime (root'siz rejim: supervizor jurnali va qulf)
+node.log
+sup-run.log
+.node.lock
+
 # Python
 __pycache__/
 *.pyc

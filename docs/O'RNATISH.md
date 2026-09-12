@@ -16,8 +16,9 @@ Ishni tugatdim deyishdan oldin **hammasi** bajarilgan bo'lishi shart:
 
 1. `node.py` ishlab turibdi va markazga ulangan.
 2. Autostart o'rnatilgan (kompyuter o'chib-yonsa o'zi ishga tushadi).
-3. **Qayta yuklab (yoki servisni qayta ishga tushirib) tekshirilgan** — node
-   yana o'zi ulandi.
+3. **O'zini ko'tarish tekshirilgan** — jarayonni majburan o'ldirganда
+   `Restart=always` uni qayta ko'taradi va yuklanishga yoqilgan (6.3). Ishlab
+   turgan serverda REBOOT qilma.
 4. Repo `git` kloni (markazdan `update` kelganda o'zini yangilay olishi uchun).
 5. Egaga qisqa hisobot: node nomi, id si, OS, autostart turi, tekshiruv natijasi.
 
@@ -175,17 +176,27 @@ tail -5 /tmp/supagent.out /tmp/supagent.err  # macOS
 ```
 Logda `-> https://agi.1pro.uz` ko'rinishi va xato bo'lmasligi kerak.
 
-### 6.3 QAYTA YUKLASH SINOVI (eng muhim)
+### 6.3 O'zini ko'tarish sinovi (reboot SHART EMAS)
 
-Autostartning yagona haqiqiy isboti — qayta yuklashdan keyin o'zi ulanishi.
+> ⚠️ **Ishlab turgan serverda reboot qilma.** Bu mashinada boshqa jonli
+> xizmatlar bo'lishi mumkin - reboot ularning barchasini uzadi. Reboot
+> autostartning yagona isboti EMAS. Quyidagilar rebootsiz ham "xizmat
+> o'chsa o'zi ko'tariladi va yuklanishda yoqilgan" degan to'liq isbot:
 
 ```bash
-sudo reboot        # yoki servisni qayta ishga tushir: systemctl restart sup-agent
+# 1) yuklanishda yoqilganmi
+systemctl is-enabled sup-agent            # -> enabled
+# 2) unit fayl to'g'rimi
+systemd-analyze verify sup-agent.service  # -> jim (xato yo'q)
+# 3) jarayonni MAJBURAN o'ldir - Restart=always uni qayta ko'taradimi
+sudo systemctl kill -s KILL sup-agent
+sleep 8
+systemctl is-active sup-agent             # -> yana active
+journalctl -u sup-agent -n 5 --no-pager   # qayta ulanish izlari, xatosiz
 ```
 
-Qayta yonganidan ~1 daqiqa keyin 6.1 va 6.2 ni **yana** tekshir. Node yana
-`active` va ulangan bo'lishi shart. Haqiqiy reboot imkoni bo'lmasa, hech
-bo'lmasa servisni to'liq `stop` qilib, `start` qilib, o'zi ko'tarilishini ko'r.
+To'liq reboot isboti kerak bo'lsa - uni **faqat ega belgilagan vaqtda**,
+boshqa xizmatlar to'xtashiga tayyor bo'lganda, alohida qil.
 
 ### 6.4 Markaz tomonidan tasdiqlash (egada)
 
@@ -213,7 +224,7 @@ Egaga shu qatorni qaytar:
 
 ```
 node: <nom> (<id>) · <OS> · autostart: <systemd|launchd|task> ·
-tekshiruv: yoqilgan=ha, reboot-sinovi=ha, markazda-onlayn=ha
+tekshiruv: yoqilgan=ha, o'zini-ko'tardi=ha, markazda-onlayn=ha
 ```
 
 Biror band "yo'q" bo'lsa — sabab bilan yoz va tuzat. Autostart yoki reboot

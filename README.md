@@ -17,22 +17,25 @@ bajaradi: shell buyruq, fayl olish/berish, o'zini yangilash.
 
 ## O'rnatish
 
-```bash
-git clone https://github.com/Yaxyobek0877/sup-agent.git
-cd sup-agent
-cp config.example.json config.json
-# Kalitni muhit orqali bering (chatga/faylga matn qilib yozmang):
-export SUP_FLEET_KEY='<markazda: agent hub key>'
-export SUP_NODE_NAME='makbuk'
-python3 setup_config.py       # config.json ni to'ldiradi, chmod 600 qiladi
-python3 node.py
-```
-
-Fleet kalitini markazda oling:
+**Bir buyruqli o'rnatish** (Linux/macOS) — config, autostart va majburiy
+tekshiruvni o'zi qiladi:
 
 ```bash
-agent hub key
+sudo git clone https://github.com/Yaxyobek0877/sup-agent.git /opt/sup-agent
+sudo chown -R "$USER" /opt/sup-agent
+cd /opt/sup-agent
+export SUP_FLEET_KEY='<markazda: agent hub key>'   # kalitni chatga yozmang
+export SUP_NODE_NAME='face'
+bash install.sh
 ```
+
+`install.sh`: `setup_config.py` (kalit muhitdan, `chmod 600`) → `node.py --once`
+ulanish sinovi → systemd/launchd autostart (`Restart=always` + boot) →
+o'zini-ko'tarish sinovi (jarayonni o'ldiradi, **reboot emas**) →
+sir-himoya tekshiruvi → hisobot. Idempotent.
+
+Qo'lda/dev uchun: `cp config.example.json config.json && python3 setup_config.py`
+so'ng `python3 node.py`. Fleet kalitini markazda `agent hub key` beradi.
 
 > **Qurilmani AI sozlasa (30+ server uchun)** — o'rnatishni har serverdagi
 > Claude Code ga topshiring: **[docs/OPERATOR-PROMPT.md](docs/OPERATOR-PROMPT.md)**.

@@ -17,25 +17,26 @@ bajaradi: shell buyruq, fayl olish/berish, o'zini yangilash.
 
 ## O'rnatish
 
-**Bir buyruqli o'rnatish** (Linux/macOS) — config, autostart va majburiy
-tekshiruvni o'zi qiladi:
+**Bir buyruqli o'rnatish** (Linux/macOS, root systemd) — config, autostart va
+majburiy tekshiruvni o'zi qiladi. Kalit o'rniga qisqa umrli **enroll (sessiya)
+tokeni** ishlatiladi: node o'zini ro'yxatga olib doimiy kalitni oladi.
 
 ```bash
 sudo git clone https://github.com/Yaxyobek0877/sup-agent.git /opt/sup-agent
-sudo chown -R "$USER" /opt/sup-agent
 cd /opt/sup-agent
-export SUP_FLEET_KEY='<markazda: agent hub key>'   # kalitni chatga yozmang
-export SUP_NODE_NAME='face'
-bash install.sh
+export SUP_ENROLL='<markazda: agent hub enroll>'   # qisqa umrli token
+sudo -E bash install.sh
 ```
 
-`install.sh`: `setup_config.py` (kalit muhitdan, `chmod 600`) → `node.py --once`
-ulanish sinovi → systemd/launchd autostart (`Restart=always` + boot) →
-o'zini-ko'tarish sinovi (jarayonni o'ldiradi, **reboot emas**) →
+`install.sh`: `setup_config.py` (token/kalit muhitdan, `chmod 600`) →
+`node.py --once` (kalit yo'q bo'lsa **o'zini ro'yxatga oladi**) → tizim systemd
+(`Restart=always` + boot) → o'zini-ko'tarish sinovi (**reboot emas**) →
 sir-himoya tekshiruvi → hisobot. Idempotent.
 
-Qo'lda/dev uchun: `cp config.example.json config.json && python3 setup_config.py`
-so'ng `python3 node.py`. Fleet kalitini markazda `agent hub key` beradi.
+Markazda token oling: **`agent hub enroll`**. Doimiy kalit kerak bo'lsa
+`SUP_FLEET_KEY='<agent hub key>'` ham ishlaydi. Qo'lda/dev:
+`cp config.example.json config.json && SUP_ENROLL=... python3 setup_config.py`
+so'ng `python3 node.py`.
 
 > **Qurilmani AI sozlasa (30+ server uchun)** — o'rnatishni har serverdagi
 > Claude Code ga topshiring: **[docs/OPERATOR-PROMPT.md](docs/OPERATOR-PROMPT.md)**.
@@ -48,7 +49,8 @@ so'ng `python3 node.py`. Fleet kalitini markazda `agent hub key` beradi.
 | kalit | ma'nosi |
 |-------|---------|
 | `hub` | markaz manzili, masalan `https://agi.1pro.uz` yoki `http://192.168.1.10:8765` |
-| `key` | fleet kaliti (markazdan) |
+| `enroll` | sessiya tokeni (`agent hub enroll`) — `key` o'rniga; node ro'yxatdan o'tib doimiy kalitni oladi, so'ng bu maydon o'chadi |
+| `key` | fleet kaliti (`agent hub key`) — `enroll` ishlatilsa avtomatik to'ladi |
 | `node_id` | bo'sh qoldiring - o'zi yaratadi va yozib qo'yadi |
 | `name` | qulay nom, masalan `makbuk`, `vps-1` |
 | `shell` | `null` (OS standarti) yoki masalan `/bin/bash` |

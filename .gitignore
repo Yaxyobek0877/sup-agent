@@ -2,6 +2,7 @@
 config.json
 .node-id
 .sup_key
+.sup_enroll
 .fleet-key
 
 # Claude Code: umumiy .claude/settings.json commit bo'ladi (guardrail),

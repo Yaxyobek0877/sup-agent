@@ -85,22 +85,65 @@ def _verify(key_hex, cmd, node_id, now):
     return True, "ok"
 
 
+def _save_config(cfg: dict) -> None:
+    CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
+                      encoding="utf-8")
+
+
+def _enroll(hub: str, token: str, hello: dict) -> str:
+    """O'zini ro'yxatga olish: enroll (sessiya) tokeni bilan markazga murojaat
+    qilib DOIMIY fleet kalitini oladi. Shunday qilib har qurilmaga kalitni
+    qo'lda tarqatish shart emas - qisqa umrli token yetadi."""
+    body = json.dumps({"token": token, **hello}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{hub.rstrip('/')}/api/hub/enroll", data=body, method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        sys.exit(f"enroll rad etildi ({exc.code}): {detail}")
+    except (urllib.error.URLError, OSError) as exc:
+        sys.exit(f"enroll: markazga ulanib bo'lmadi: {exc}")
+    key = data.get("key")
+    if not key:
+        sys.exit("enroll: markaz kalit qaytarmadi")
+    return key
+
+
 def load_config() -> dict:
     if not CONFIG.exists():
         sys.exit(
             f"config.json topilmadi: {CONFIG}\n"
             "Namuna: config.example.json ni nusxa oling va to'ldiring.")
     cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
-    if not cfg.get("hub") or not cfg.get("key"):
-        sys.exit("config.json da 'hub' (markaz manzili) va 'key' (fleet kaliti) "
-                 "bo'lishi shart.")
-    # node_id yo'q bo'lsa - yaratamiz va config ga yozib qo'yamiz (barqaror bo'lsin)
+    if not cfg.get("hub"):
+        sys.exit("config.json da 'hub' (markaz manzili) bo'lishi shart.")
+    # node_id yo'q bo'lsa - yaratamiz va config ga yozamiz (barqaror bo'lsin)
     if not cfg.get("node_id"):
         import secrets
         host = socket.gethostname().split(".")[0].lower()
         cfg["node_id"] = f"{host}-{secrets.token_hex(2)}"
-        CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
-                          encoding="utf-8")
+        _save_config(cfg)
+    # Fleet kaliti yo'q bo'lsa - enroll (sessiya) tokeni bilan o'zini ro'yxatga
+    # olib doimiy kalitni oladi. Token config `enroll` da yoki SUP_ENROLL da.
+    if not cfg.get("key"):
+        token = (cfg.get("enroll") or os.environ.get("SUP_ENROLL") or "").strip()
+        if not token:
+            sys.exit("config.json da 'key' (fleet kaliti) yoki 'enroll' tokeni "
+                     "kerak.\nMarkazda token oling: agent hub enroll")
+        hello = {
+            "node_id": cfg["node_id"],
+            "name": cfg.get("name") or cfg["node_id"],
+            "os": platform.system(), "arch": platform.machine(),
+            "hostname": socket.gethostname(), "version": VERSION,
+        }
+        print("[sup-agent] enroll: o'zini ro'yxatga olyapti ...")
+        cfg["key"] = _enroll(cfg["hub"], token, hello)
+        cfg.pop("enroll", None)          # token bir martalik - saqlamaymiz
+        _save_config(cfg)
+        print("[sup-agent] enroll: fleet kaliti olindi va saqlandi")
     return cfg
 
 

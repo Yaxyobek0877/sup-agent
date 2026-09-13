@@ -21,24 +21,31 @@ cd "$HERE"
 log() { printf '\n[install] %s\n' "$*"; }
 die() { printf '\n[install] XATO: %s\n' "$*" >&2; exit 1; }
 
-# 0) Fleet kaliti: MUHITDAN yoki KALIT FAYLIDAN (~/.sup_key yoki ./.sup_key).
-#    Fayl — markazdan `scp .fleet-key user@host:~/.sup_key` bilan tashilgan sir.
-#    Shunday qilingani uchun agentning "yangi shell" muhiti muhim emas: skript
-#    kalitni fayldan o'qiydi va config yozilgach faylni O'CHIRADI.
+# 0) Kirish siri: ENROLL (sessiya) tokeni YOKI doimiy fleet kaliti. Ikkalasi
+#    ham muhitdan (SUP_ENROLL / SUP_FLEET_KEY) yoki fayldan o'qiladi
+#    (~/.sup_enroll / ~/.sup_key). Fayldan o'qilsa - config yozilgach O'CHADI.
+#    Tavsiya: `agent hub enroll` bilan qisqa umrli token - node o'zini
+#    ro'yxatga olib doimiy kalitni oladi (kalitni qo'lda tarqatish shart emas).
 KEYFILE=""
-if [ -z "${SUP_FLEET_KEY:-}" ]; then
-  for f in "$HOME/.sup_key" "$HERE/.sup_key"; do
+if [ -z "${SUP_FLEET_KEY:-}" ] && [ -z "${SUP_ENROLL:-}" ]; then
+  for f in "$HOME/.sup_enroll" "$HERE/.sup_enroll"; do
     if [ -f "$f" ]; then
-      SUP_FLEET_KEY="$(tr -d '\r\n' < "$f")"
-      export SUP_FLEET_KEY
-      KEYFILE="$f"
-      break
+      SUP_ENROLL="$(tr -d '\r\n' < "$f")"; export SUP_ENROLL; KEYFILE="$f"; break
     fi
   done
 fi
-[ -n "${SUP_FLEET_KEY:-}" ] || die "fleet kaliti yo'q (muhitda ham, ~/.sup_key da ham).
-  Markazdan:  scp .fleet-key <user>@<host>:~/.sup_key
-  yoki:       export SUP_FLEET_KEY='...'   (kalitni chatga yozmang)"
+if [ -z "${SUP_FLEET_KEY:-}" ] && [ -z "${SUP_ENROLL:-}" ]; then
+  for f in "$HOME/.sup_key" "$HERE/.sup_key"; do
+    if [ -f "$f" ]; then
+      SUP_FLEET_KEY="$(tr -d '\r\n' < "$f")"; export SUP_FLEET_KEY; KEYFILE="$f"; break
+    fi
+  done
+fi
+if [ -z "${SUP_FLEET_KEY:-}" ] && [ -z "${SUP_ENROLL:-}" ]; then
+  die "enroll token yoki fleet kaliti yo'q (muhitda ham, faylda ham).
+  Markazda:  agent hub enroll   (qisqa umrli sessiya tokeni - tavsiya)
+  So'ng:     export SUP_ENROLL='...'   (yoki SUP_FLEET_KEY); chatga yozmang"
+fi
 
 # 1) Talablar
 command -v python3 >/dev/null || die "python3 yo'q (apt install -y python3)"

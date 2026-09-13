@@ -28,11 +28,14 @@ EXAMPLE = HERE / "config.example.json"
 
 def main() -> None:
     key = os.environ.get("SUP_FLEET_KEY", "").strip()
-    if not key:
+    enroll = os.environ.get("SUP_ENROLL", "").strip()
+    if not key and not enroll:
         sys.exit(
-            "SUP_FLEET_KEY topilmadi. Ega o'rnatishdan oldin export qilishi "
-            "kerak:\n    export SUP_FLEET_KEY='<markazda: agent hub key>'\n"
-            "Kalitni bu yerga matn sifatida yozma — muhit orqali ber.")
+            "SUP_FLEET_KEY yoki SUP_ENROLL topilmadi. Markazda oling:\n"
+            "  agent hub enroll   -> qisqa umrli sessiya tokeni (TAVSIYA)\n"
+            "  agent hub key      -> doimiy fleet kaliti\n"
+            "So'ng serverda:  export SUP_ENROLL='...'  (yoki SUP_FLEET_KEY)\n"
+            "Qiymatni chatga yozmang — muhit orqali bering.")
 
     # Namunadan boshlaymiz (bor bo'lsa), yo'q bo'lsa bo'sh andozadan.
     if CONFIG.exists():
@@ -43,7 +46,12 @@ def main() -> None:
         cfg = {"hub": "", "key": "", "node_id": "", "name": "",
                "shell": None, "projects": []}
 
-    cfg["key"] = key
+    if key:                      # doimiy fleet kaliti
+        cfg["key"] = key
+        cfg.pop("enroll", None)
+    else:                        # enroll token - node o'zini ro'yxatga oladi
+        cfg["enroll"] = enroll
+        cfg.pop("key", None)
     cfg["hub"] = os.environ.get("SUP_HUB", "").strip() or cfg.get("hub") \
         or "https://agi.1pro.uz"
     name = os.environ.get("SUP_NODE_NAME", "").strip()
@@ -64,9 +72,10 @@ def main() -> None:
     except OSError:
         pass
 
-    # DIQQAT: kalit qiymati chop etilmaydi.
+    # DIQQAT: kalit/token qiymati chop etilmaydi.
+    mode = "fleet kaliti" if key else "enroll token"
     print(f"config.json to'ldirildi: hub={cfg['hub']} name={cfg.get('name','')} "
-          f"(kalit yashirin, ruxsat 600)")
+          f"({mode}, yashirin, ruxsat 600)")
 
 
 if __name__ == "__main__":

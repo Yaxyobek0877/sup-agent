@@ -27,16 +27,23 @@ die() { printf '\n[install] XATO: %s\n' "$*" >&2; exit 1; }
 #    Tavsiya: `agent hub enroll` bilan qisqa umrli token - node o'zini
 #    ro'yxatga olib doimiy kalitni oladi (kalitni qo'lda tarqatish shart emas).
 KEYFILE=""
+# `sudo bash install.sh` da $HOME=/root bo'ladi, shuning uchun chaqirgan
+# foydalanuvchi (SUDO_USER) uyini ham qaraymiz - agent faylni o'z uyiga
+# sudo'siz qo'yadi, biz esa root sifatida o'shani o'qiymiz.
+SUDO_HOME=""
+if [ -n "${SUDO_USER:-}" ]; then
+  SUDO_HOME="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)"
+fi
 if [ -z "${SUP_FLEET_KEY:-}" ] && [ -z "${SUP_ENROLL:-}" ]; then
-  for f in "$HOME/.sup_enroll" "$HERE/.sup_enroll"; do
-    if [ -f "$f" ]; then
+  for f in "$HOME/.sup_enroll" "${SUDO_HOME:+$SUDO_HOME/.sup_enroll}" "$HERE/.sup_enroll"; do
+    if [ -n "$f" ] && [ -f "$f" ]; then
       SUP_ENROLL="$(tr -d '\r\n' < "$f")"; export SUP_ENROLL; KEYFILE="$f"; break
     fi
   done
 fi
 if [ -z "${SUP_FLEET_KEY:-}" ] && [ -z "${SUP_ENROLL:-}" ]; then
-  for f in "$HOME/.sup_key" "$HERE/.sup_key"; do
-    if [ -f "$f" ]; then
+  for f in "$HOME/.sup_key" "${SUDO_HOME:+$SUDO_HOME/.sup_key}" "$HERE/.sup_key"; do
+    if [ -n "$f" ] && [ -f "$f" ]; then
       SUP_FLEET_KEY="$(tr -d '\r\n' < "$f")"; export SUP_FLEET_KEY; KEYFILE="$f"; break
     fi
   done

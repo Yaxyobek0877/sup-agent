@@ -14,15 +14,34 @@ Ikki qatlam himoya ishlaydi:
 
 ---
 
-## 1. Kalitni muhitga ber (chatga EMAS)
+## 1. Kirish sirini muhitga ber (chatga EMAS)
 
-Fleet kaliti sir. Uni AI suhbatiga yozma — ishga tushiradigan shellda export
-qil, skript o'zi oladi:
+Yangi qurilmani ulash uchun bitta operator siri kerak — bu **ataylab** shunday:
+sirsiz istalgan odam fleet'ga qo'shilib serverlaringizga buyruq bera olardi.
+AI uni o'zi **ololmaydi** (login/parol ham so'ramaydi) — sirni **siz** berasiz,
+qolganini AI qiladi. Sirni suhbatga yozma, shellda export qil:
+
+**A) Enroll token — TAVSIYA (qisqa umrli, bir martalik, xavfsizroq):**
+Markazda token yarat; node u bilan o'zini ro'yxatga oladi va doimiy fleet
+kalitini o'zi oladi — doimiy kalit hech qayerda ochilmaydi. Token oshkor bo'lsa
+ham zarar cheklangan (bir marta ishlaydi, muddati o'tadi).
+
+```bash
+export SUP_ENROLL='<markazda: agent hub enroll>'   # enr_... bilan boshlanadi
+export SUP_NODE_NAME='vps-frankfurt'               # takrorlanmas nom
+```
+
+**B) To'g'ridan-to'g'ri fleet kaliti** (doimiy — oshkor bo'lsa butun fleet xavf
+ostida, ehtiyot bo'l):
 
 ```bash
 export SUP_FLEET_KEY='<markazda: agent hub key>'
-export SUP_NODE_NAME='vps-frankfurt'      # takrorlanmas nom
+export SUP_NODE_NAME='vps-frankfurt'
 ```
+
+Ikkalasi ham muhitda bo'lmasa `~/.sup_enroll` yoki `~/.sup_key` fayldan o'qiladi
+(config yozilgach fayl o'chadi). **AI'ga:** hech biri berilmagan bo'lsa — TO'XTA
+va operatordan **enroll token** so'ra (`agent hub enroll`); login/parol EMAS.
 
 ## 2. Serverga reponi ol va AI ni ishga tushir
 
@@ -43,7 +62,7 @@ qo'llanadi. Prompt qisqa bo'lishi mumkin, chunki batafsil ko'rsatma
 
 ```bash
 claude --permission-mode acceptEdits \
-  -p "docs/O'RNATISH.md ni to'liq bajar. CLAUDE.md qizil chiziqlariga amal qil. Fleet kalitini SUP_FLEET_KEY muhitidan python3 setup_config.py orqali yoz. Har tekshiruvni (§6) haqiqatan ishga tushir; oxirida §7 hisobotini qaytar."
+  -p "docs/O'RNATISH.md ni to'liq bajar. CLAUDE.md qizil chiziqlariga amal qil. Kirish sirini (SUP_ENROLL enroll tokeni yoki SUP_FLEET_KEY) muhitdan python3 setup_config.py orqali yoz - login/parol so'rama, siri berilmagan bo'lsa to'xtab enroll token so'ra. Har tekshiruvni (§6) haqiqatan ishga tushir; oxirida §7 hisobotini qaytar."
 ```
 
 Interaktiv istasang: shunchaki `claude` ni och va pastdagi **PROMPT** bloqini

@@ -46,6 +46,9 @@ UA = "sup-agent/" + VERSION
 # aks holda javob kelishidan oldin uzilib, buyruq yo'qolishi mumkin.
 POLL_TIMEOUT = 60
 BACKOFF_MAX = 30
+# 403 uzoq davom etsa (haqiqiy blok yoki WAF) shu chegaragacha sekinlashamiz,
+# lekin HECH QACHON butunlay to'xtamaymiz - o'tkinchi 403 qurilmani o'ldirmasin.
+BLOCK_BACKOFF_MAX = 900
 
 # --- buyruq imzosi ---------------------------------------------------------
 # Node faqat IMZOLANGAN buyruqni bajaradi. Imzo kaliti (HMAC) markaz va shu
@@ -90,7 +93,7 @@ def _save_config(cfg: dict) -> None:
                       encoding="utf-8")
 
 
-def _enroll(hub: str, token: str, hello: dict) -> str:
+def _enroll(hub: str, token: str, hello: dict) -> dict:
     """O'zini ro'yxatga olish: enroll (sessiya) tokeni bilan markazga murojaat
     qilib DOIMIY fleet kalitini oladi. Shunday qilib har qurilmaga kalitni
     qo'lda tarqatish shart emas - qisqa umrli token yetadi."""
@@ -106,10 +109,9 @@ def _enroll(hub: str, token: str, hello: dict) -> str:
         sys.exit(f"enroll rad etildi ({exc.code}): {detail}")
     except (urllib.error.URLError, OSError) as exc:
         sys.exit(f"enroll: markazga ulanib bo'lmadi: {exc}")
-    key = data.get("key")
-    if not key:
-        sys.exit("enroll: markaz kalit qaytarmadi")
-    return key
+    if not data.get("key") or not data.get("sign_key"):
+        sys.exit("enroll: markaz shaxsiy kalit qaytarmadi; markazni yangilang")
+    return {"key": data["key"], "sign_key": data["sign_key"]}
 
 
 def load_config() -> dict:
@@ -128,11 +130,11 @@ def load_config() -> dict:
         _save_config(cfg)
     # Fleet kaliti yo'q bo'lsa - enroll (sessiya) tokeni bilan o'zini ro'yxatga
     # olib doimiy kalitni oladi. Token config `enroll` da yoki SUP_ENROLL da.
-    if not cfg.get("key"):
+    if not cfg.get("key") or not cfg.get("sign_key"):
         token = (cfg.get("enroll") or os.environ.get("SUP_ENROLL") or "").strip()
         if not token:
-            sys.exit("config.json da 'key' (fleet kaliti) yoki 'enroll' tokeni "
-                     "kerak.\nMarkazda token oling: agent hub enroll")
+            sys.exit("config.json da key va sign_key yoki yangi enroll tokeni kerak.\n"
+                     "Markazda token oling: agent hub enroll")
         hello = {
             "node_id": cfg["node_id"],
             "name": cfg.get("name") or cfg["node_id"],
@@ -140,7 +142,7 @@ def load_config() -> dict:
             "hostname": socket.gethostname(), "version": VERSION,
         }
         print("[sup-agent] enroll: o'zini ro'yxatga olyapti ...")
-        cfg["key"] = _enroll(cfg["hub"], token, hello)
+        cfg.update(_enroll(cfg.get("enroll_hub") or cfg["hub"], token, hello))
         cfg.pop("enroll", None)          # token bir martalik - saqlamaymiz
         _save_config(cfg)
         print("[sup-agent] enroll: fleet kaliti olindi va saqlandi")
@@ -170,6 +172,8 @@ class Node:
         self.shell = cfg.get("shell")  # None = OS standarti
         self.projects = _norm_projects(cfg.get("projects"))
         self.sign_key = cfg.get("sign_key") or ""   # buyruq imzosi kaliti
+        self.auth_key = hmac.new(bytes.fromhex(self.sign_key),
+                                 ("node-auth-v1:" + self.node_id).encode(), "sha256").hexdigest()
         self.seen = set()                            # bajarilgan buyruq id lari (takrorga qarshi)
         self.logbuf = []                             # markazga yuboriladigan jurnal
         parsed = urllib.parse.urlparse(self.hub)
@@ -184,7 +188,8 @@ class Node:
         req = urllib.request.Request(
             f"{self.hub}{path}", data=data, method="POST",
             headers={"Content-Type": "application/json", "User-Agent": UA,
-                     "X-Fleet-Key": self.key, "X-Node-Id": self.node_id})
+                     "X-Fleet-Key": self.key, "X-Node-Id": self.node_id,
+                     "X-Node-Key": self.auth_key})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
@@ -233,23 +238,6 @@ class Node:
             "keyed": bool(self.sign_key),
         }
 
-    def _provision(self, prov) -> None:
-        """Markaz birinchi ulanishda imzo kalitini yuboradi - saqlab qo'yamiz."""
-        if not prov:
-            return
-        key = prov.get("sign_key")
-        if key and not self.sign_key:
-            self.sign_key = key
-            try:
-                cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
-                cfg["sign_key"] = key
-                CONFIG.write_text(
-                    json.dumps(cfg, ensure_ascii=False, indent=2),
-                    encoding="utf-8")
-                print("[sup-agent] imzo kaliti o'rnatildi")
-            except OSError as exc:
-                print(f"[sup-agent] kalitni saqlab bo'lmadi: {exc}")
-
     def _authorize(self, cmd) -> tuple:
         """Buyruq imzosi va takror tekshiruvi. Faqat o'tgan buyruq bajariladi."""
         ok, why = _verify(self.sign_key, cmd, self.node_id, int(time.time()))
@@ -272,7 +260,6 @@ class Node:
                 resp = self._post("/api/hub/poll", self.hello(), POLL_TIMEOUT)
                 backoff = 1
                 blocks = 0
-                self._provision(resp.get("provision"))
                 cmd = resp.get("command")
                 if cmd:
                     self.handle(cmd)
@@ -280,18 +267,32 @@ class Node:
                 if once:
                     return
             except urllib.error.HTTPError as exc:
+                cap = BACKOFF_MAX
                 if exc.code == 403:
-                    # 403 haqiqiy blok bo'lishi mumkin, lekin o'tkinchi (proksi/
-                    # WAF) ham. Bittasidan to'xtamaymiz - ketma-ket 5 tadan keyin.
+                    # 403 o'tkinchi (proksi/WAF blipi) ham, haqiqiy blok ham
+                    # bo'lishi mumkin. Ilgari ketma-ket 5 tadan keyin BUTUNLAY
+                    # to'xtardik (return) - va bir WAF blipi 2026-09-19 da ikkala
+                    # qurilmani 6 kunga o'chirib qo'ydi (systemd start-limit ham
+                    # qayta ko'tarmadi). Endi to'xtamaymiz: 5 tadan keyin uzoq
+                    # backoff (15 daqiqagacha) bilan poll qilishda DAVOM etamiz -
+                    # o'tkinchi bo'lsa birinchi muvaffaqiyatli pollda o'zi
+                    # tuzaladi (yuqorida blocks=0), haqiqiy blokda esa markazni
+                    # ortiqcha yuklamaymiz.
                     blocks += 1
-                    if blocks >= 5:
-                        self._log(L_WARN, "qurilma bloklangan (403), to'xtatildi")
+                    if once:                       # bir martalik poll - loop yo'q
+                        self._log(L_WARN, "403 (once) - to'xtatildi")
                         return
-                    self._log(L_WARN, f"403 (urinish {blocks}/5)")
+                    if blocks == 5:
+                        self._log(L_WARN, "403 uzoq davom etyapti - uzoq backoff "
+                                          "bilan qayta urinishda davom etadi")
+                    elif blocks < 5:
+                        self._log(L_WARN, f"403 (urinish {blocks}/5)")
+                    if blocks >= 5:
+                        cap = BLOCK_BACKOFF_MAX
                 else:
                     self._log(L_WARN, f"markaz xatosi {exc.code}")
                 time.sleep(backoff)
-                backoff = min(backoff * 2, BACKOFF_MAX)
+                backoff = min(backoff * 2, cap)
             except (urllib.error.URLError, OSError, ConnectionError) as exc:
                 # Ulanmadi - jurnal buferda qoladi, ulangach yuboriladi
                 self._log(L_WARN, f"ulanmadi: {exc}")
@@ -384,6 +385,7 @@ class Node:
         conn.putheader("User-Agent", UA)
         conn.putheader("X-Fleet-Key", self.key)
         conn.putheader("X-Node-Id", self.node_id)
+        conn.putheader("X-Node-Key", self.auth_key)
         conn.putheader("Content-Type", "application/octet-stream")
         conn.putheader("Content-Length", str(size))
         conn.endheaders()
@@ -405,7 +407,7 @@ class Node:
         req = urllib.request.Request(
             f"{self.hub}/api/hub/blob/{blob_id}",
             headers={"User-Agent": UA, "X-Fleet-Key": self.key,
-                     "X-Node-Id": self.node_id})
+                     "X-Node-Id": self.node_id, "X-Node-Key": self.auth_key})
         size = 0
         with urllib.request.urlopen(req, timeout=1800) as resp, \
                 open(dest, "wb") as fh:

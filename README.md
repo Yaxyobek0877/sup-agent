@@ -1,5 +1,21 @@
 # sup-agent
 
+## 1.1.0: qurilmaning alohida ruxsati
+
+Mijoz `sign_key` dan alohida HTTP kalitini chiqarib, har so'rovda `X-Node-Key`
+orqali yuboradi. `sign_key` oddiy so'rovlarda yuborilmaydi va `poll` javobidan
+olinmaydi. Mavjud `sign_key` saqlangan konfiguratsiya bilan yangilash yetarli.
+
+Yangi ulanish uchun bir martalik enroll tokeni kerak. Edge orqali ishlaganda
+`enroll_hub` ni markazning to'g'ridan-to'g'ri HTTPS manziliga qo'ying; `hub`
+edge manzilida qoladi. Kalitsiz mavjud ID qayta ro'yxatdan o'tkazilmaydi:
+egasi markazda eski yozuvni tekshirishi kerak.
+
+Sinov: `python -B -m unittest discover -s tests -v`.
+
+Markaz va edge ham mos kod bilan yangilanishi kerak. Tafsilotlar yonma-yon
+`agent/docs/YANGILASH-XAVFSIZLIK.md` hujjatida.
+
 Markaziy agentga ulanadigan **qurilma agenti**. Uni makbuk, VPS yoki istalgan
 serverga qo'yasiz - u markazga o'zi ulanadi va markazdan kelgan buyruqlarni
 bajaradi: shell buyruq, fayl olish/berish, o'zini yangilash.
